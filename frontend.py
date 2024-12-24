@@ -26,7 +26,7 @@ class APITask(QThread):
         """Make API call to custom server"""
         try:
             # Prepare the API endpoint
-            url = "https://6d4e-142-181-110-204.ngrok-free.app/upload"  # Replace with your actual server URL
+            url = "http://127.0.0.1:4998/upload"  # Replace with your actual server URL
 
             # Prepare multipart/form-data payload
             payload = {
