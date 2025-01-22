@@ -12,6 +12,7 @@ PyInstaller.__main__.run([
     '--windowed',  # For GUI applications (remove for console applications)
     f'--icon={ICON_PATH}',  # Optional: Add an icon
     '--name', f'{PROGRAM_NAME}',
+    '--add-data', 'gcpKey.json;.',
     '--add-data', 'Animation 1/*;Animation 1',
     '--add-data', 'Animation 2/*;Animation 2',
     '--add-data', 'Animation 3/*;Animation 3',

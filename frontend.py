@@ -11,7 +11,7 @@ import logging
 import traceback
 from packaging.version import Version
 
-CURRENT_VERSION = Version("0.0.1")
+CURRENT_VERSION = Version("0.0.2")
 METADATA_URL = "https://github.com/Dishu-Bansal/Documatic/blob/main/update.json"
 
 def check_for_updates():
