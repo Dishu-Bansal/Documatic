@@ -19,7 +19,7 @@ PyInstaller.__main__.run([
     '--add-data', 'D:\SPECIAL\Documatic\Animation 4\*;Animation 4',
     '--add-data', 'D:\SPECIAL\Documatic\Animation 5\*;Animation 5',  # Optional: Include additional files
     '--clean',  # Clean PyInstaller cache and remove temporary files
-    # '--console',
+    '--console',
     '--hidden-import=_ssl',
     '--hidden-import=cryptography',
     '--collect-all', 'certifi',
