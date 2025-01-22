@@ -11,7 +11,7 @@ import logging
 import traceback
 from packaging.version import Version
 
-CURRENT_VERSION = Version("0.0.2")
+CURRENT_VERSION = Version("0.0.4")
 METADATA_URL = "https://github.com/Dishu-Bansal/Documatic/blob/main/update.json"
 
 def check_for_updates():
@@ -954,7 +954,7 @@ if __name__ == "__main__":
         try:
             configure_ssl()
             print("SSL Configuration completed")
-            cred = credentials.Certificate("gcpKey.json")
+            cred = credentials.Certificate(get_resource_path("gcpKey.json"))
             logging.info("Firebase credentials loaded successfully")
 
             app = firebase_admin.initialize_app(cred)

@@ -12,12 +12,12 @@ PyInstaller.__main__.run([
     '--windowed',  # For GUI applications (remove for console applications)
     f'--icon={ICON_PATH}',  # Optional: Add an icon
     '--name', f'{PROGRAM_NAME}',
-    '--add-data', 'gcpKey.json;.',
-    '--add-data', 'Animation 1/*;Animation 1',
-    '--add-data', 'Animation 2/*;Animation 2',
-    '--add-data', 'Animation 3/*;Animation 3',
-    '--add-data', 'Animation 4/*;Animation 4',
-    '--add-data', 'Animation 5/*;Animation 5',  # Optional: Include additional files
+    '--add-data', 'D:\SPECIAL\Documatic\gcpKey.json;.',
+    '--add-data', 'D:\SPECIAL\Documatic\Animation 1\*;Animation 1',
+    '--add-data', 'D:\SPECIAL\Documatic\Animation 2\*;Animation 2',
+    '--add-data', 'D:\SPECIAL\Documatic\Animation 3\*;Animation 3',
+    '--add-data', 'D:\SPECIAL\Documatic\Animation 4\*;Animation 4',
+    '--add-data', 'D:\SPECIAL\Documatic\Animation 5\*;Animation 5',  # Optional: Include additional files
     '--clean',  # Clean PyInstaller cache and remove temporary files
     # '--console',
     '--hidden-import=_ssl',
