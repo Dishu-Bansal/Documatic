@@ -1,2 +1,9 @@
 Indian License.pdf
 file_summaries.db
+__pycache__/*
+build/*
+dist/*
+Documatic.spec
+faiss_index.bin
+gcpKey.json
+metadata.json

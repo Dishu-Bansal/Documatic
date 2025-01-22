@@ -3,6 +3,30 @@ import os
 import requests
 import mimetypes
 import json
+import certifi
+import ssl
+import logging
+import traceback
+
+# Set up logging configuration
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(sys.stdout)
+    ]
+)
+
+def configure_ssl():
+    """Configure SSL certificate path for requests"""
+    os.environ['REQUESTS_CA_BUNDLE'] = certifi.where()
+    os.environ['SSL_CERT_FILE'] = certifi.where()
+
+    # Create a custom SSL context
+    ssl_context = ssl.create_default_context(cafile=certifi.where())
+    
+    # Configure requests to use our SSL context
+    requests.packages.urllib3.util.ssl_.DEFAULT_CERTS = certifi.where()
 
 from PyQt5.QtWidgets import (
     QApplication, QLabel, QMainWindow, QVBoxLayout, QLineEdit, QPushButton, QWidget, QDialog, QMessageBox
@@ -11,7 +35,17 @@ from PyQt5.QtCore import QTimer, Qt, QThread, pyqtSignal, QPropertyAnimation
 from PyQt5.QtGui import QPixmap
 from PIL import Image
 
+import firebase_admin
+from firebase_admin import credentials
+from firebase_admin import firestore
 
+import wmi
+
+c = wmi.WMI()
+system_info = c.Win32_ComputerSystemProduct()[0]
+id = system_info.UUID
+
+url = ""
 class APITask(QThread):
     """Handles API call to custom server"""
     completed = pyqtSignal(str)
@@ -26,10 +60,11 @@ class APITask(QThread):
         """Make API call to custom server"""
         try:
             # Prepare the API endpoint
-            url = "http://127.0.0.1:4998/upload"  # Replace with your actual server URL
+            # url = "https://c71d-69-30-85-116.ngrok-free.app/upload"  # Replace with your actual server URL
 
             # Prepare multipart/form-data payload
             payload = {
+                'id': id,
                 'text': self.message,
                 'path': self.file_path
             }
@@ -159,6 +194,12 @@ class InteractiveAnimation(QLabel):
     def __init__(self, animation1_path, animation2_path, animation3_path, animation4_path, animation5_path):
         super().__init__()
 
+        # self.setStyleSheet("""
+        #     QLabel {
+        #         background-color: lightblue;  /* Set your desired color */
+        #         border: 1px solid black;     /* Optional: Add a border for clarity */
+        #     }
+        # """)
         self.async_task = None
         self.async_task_completed = False 
         self.downloading_file = False
@@ -242,6 +283,25 @@ class InteractiveAnimation(QLabel):
         # Initialize display with the first frame of animation 1
         self.set_frame(0)
 
+        # Add close button
+        self.close_button = QPushButton('X', self)
+        self.close_button.setFixedSize(30, 30)
+        self.close_button.setStyleSheet("""
+            QPushButton {
+                background-color: red;
+                color: white;
+                border: none;
+                border-radius: 15px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: darkred;
+            }
+        """)
+        self.close_button.move(self.width() - 325, 0)  # Position in the top-right corner
+        self.close_button.clicked.connect(self.close_application)
+        self.close_button.hide()  # Hide by default
+
         # Position at top-right corner
         screen_geometry = QApplication.primaryScreen().geometry()
         self.move(screen_geometry.width() - self.width(), 0)
@@ -250,12 +310,26 @@ class InteractiveAnimation(QLabel):
         """Update the QLabel to show the specified frame."""
         try:
             pixmap = QPixmap(self.current_animation[frame])
-            scaled_pixmap = pixmap.scaled(600, 300, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            scaled_pixmap = pixmap.scaled(self.label.width(), self.label.height(), aspectRatioMode=Qt.IgnoreAspectRatio, transformMode=Qt.SmoothTransformation)
             self.label.setPixmap(scaled_pixmap)
         except IndexError:
             print(f"Frame {frame} not found in the sequence.")
         except Exception as e:
             print(f"Error loading frame {frame}: {e}")
+    
+    def close_application(self):
+        """Close the application."""
+        QApplication.instance().quit()
+
+    def enterEvent(self, event):
+        """Show the close button when the cursor enters the window."""
+        self.close_button.show()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event):
+        """Hide the close button when the cursor leaves the window."""
+        self.close_button.hide()
+        super().leaveEvent(event)
 
     def update_animation(self):
         """Control animation frames based on state."""
@@ -356,12 +430,10 @@ class InteractiveAnimation(QLabel):
                 self.current_frame = self.total_frames - 1
         
         elif self.current_state == self.AnimationState.ANIMATION4_REPEAT:
-            print(f"Animation 4 state - Current Frame: {self.current_frame}, Total Frames: {self.total_frames}")
             if self.current_frame < self.total_frames - 1:
                 self.current_frame += 1
                 self.set_frame(self.current_frame)
             else:
-                print("Resetting Animation 4 to first frame")
                 self.current_frame = 0
                 self.set_frame(self.current_frame)
 
@@ -525,7 +597,7 @@ class InteractiveAnimation(QLabel):
     
     def on_api_complete(self, response):
         """Handle successful API response."""
-        response = '{"got_file":"true","text":{"1":["Indian License.pdf","D:/Google Drive Backup/Indian License.pdf",0.42617275124563175],"2":["Coop Work Permit.pdf","D:/Google Drive Backup/Personal Documents/Coop Work Permit.pdf",0.40544333474915667],"3":["Passport.pdf","D:/Google Drive Backup/Personal Documents/Passport.pdf",0.34395519393947965]}}'
+        #response = '{"got_file":"true","text":{"1":["Indian License.pdf","D:/Google Drive Backup/Indian License.pdf",0.42617275124563175],"2":["Coop Work Permit.pdf","D:/Google Drive Backup/Personal Documents/Coop Work Permit.pdf",0.40544333474915667],"3":["Passport.pdf","D:/Google Drive Backup/Personal Documents/Passport.pdf",0.34395519393947965]}}'
         print("API Response:", response)
         
         # Show response in a message box (you could customize this)
@@ -557,16 +629,24 @@ class InteractiveAnimation(QLabel):
                 #         file2, file1 = file1, path.strip()
                 #         name2, name1 = name1, name.strip()
                 # return file1
-                name1, path1, score1 = files['1']
-                name2, path2, score2 = files['2']
-                name3, path3, score3 = files['3']
-                return [path1, path2, path3]
+                result = []
+                if '1' in files:
+                    name1, path1, score1 = files['1']
+                    result += [path1]
+                if '2' in files:
+                    name2, path2, score2 = files['2']
+                    result += [path2]
+                if '3' in files:
+                    name3, path3, score3 = files['3']
+                    result += [path3]
+                return result
                 # name2, path2, score2 = files['2']
                 # name3, path3, score3 = files['3']
-            return ""
+            return []
     
 
         self.found_file = get_top_match(json.loads(response))
+        print("Found files: " + str(self.found_file))
         
         # Clean up API task
         if self.api_task:
@@ -673,6 +753,12 @@ class FileToast(QWidget):
             btn.clicked.connect(lambda checked, f=file: self.open_file(f))
             toast_layout.addWidget(btn)
         
+        # Add extra buttons, in case result has less than 3 files, for Consistent UI
+        if len(files) < 3:
+            for i in range(3 - len(files)):
+                btn = QPushButton("")
+                toast_layout.addWidget(btn)
+        
         # Add open all button
         open_all = QPushButton("Open All")
         open_all.setStyleSheet("color: blue;")
@@ -748,13 +834,131 @@ class FileToast(QWidget):
 #         return self.text_input.text()
 
 
+# if __name__ == "__main__":
+#     try:
+#         # Use a service account.
+#         cred = credentials.Certificate({
+#     "type": "service_account",
+#     "project_id": "documatic-f77e4",
+#     "private_key_id": "70ac6a1a20961a1203fa3f9455c8a2ad2b6980a7",
+#     "private_key": "-----BEGIN PRIVATE KEY-----\nMIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQCy3Xv5OkyM6WL4\n6oRAMrR2CjsOh+5uXBLwvX6Ah4g8TfKDy9HK9/qEZN5VdaYn8mooy8F1j7qoorAI\na4ano0RzYFT4BGw0gkg7kZ/g21QNj7/U3wYMnBAafWFD69ihMtEXkNKnXYWmDJ2q\nY4gE4PHnxtao801njj7NRSa7hyO4uCNQ3AST5n75APs+ftmnzrotlzEFgzB3lZ/n\nrsc5RqH6c9aIfM+wMdJtTJC9XsVrtMX82gxIkilIzXAsqwDUtoglj56W0G0fAx/S\n/g7rxgWPSJjnwHni7KrtQx7tEEBJB3fN9mV02FP9RV7FwetMyOzKo3CDkYKRyEQQ\nvfWAQxijAgMBAAECggEAUexR+Q/zueK3myzG0CSpNRtwezJVSaTQZAVW6IWrJ3vI\nJQd4mo9D5dnRX7EYHlnQt8jDXhYrt0t0dxbQwP1tv66SnFpiORanAOmtIa8za1a4\n1UYlHido1MkygIqIWSTOUg3Z/iA+s5Q5rq4RwbJJ+g+/h/iQLmsfZqNSnzfBa7ve\nuEazWothr40lc/zwv99DDc+zPKUi9mAXOt/I7w/q0AR47rXPhLZ5VUGoSDTupBv7\nqkLNXVlbg3CyCWkJuxoxA9yMCQidka+VUJpL3P5fwo5EtETABOJwiQjgbBvS83rV\n+kAFhvzD+HROr3s6ZFJ3SK1XF9Yc+GzrDwy4LpGQeQKBgQDkeCj0FPANDBk1bMP/\nSKgn4kILcu7HEfB3NPIWVmwH8aYj5P5fsmlrVR+wxBY91KfXj7AJNCPqBAM5bLd9\nBwYOsdSqPjuYr4z7fuoPVEdVcq4GoIltMAggnTeeHMLnMLyM4dylejX+rFBYBl1Q\nzYwXGVU4Cv7vyVf631i6K68rtwKBgQDIayFXUrO3UFlfUGZ9x4OKkRs6tAiqw34I\nmOMWgSlFCAiUOXYT3KzdIZUST2TNjIm/dTg05uqaNbffnyrC4zl3e0Xxv5dxZC99\n5tTS5mPXoia+Xa8LDCGMslUXenGRbEzZiCwSL2fuMj5eygUt35OogePqL7Y5YfPc\nB0Zqk2jSdQKBgFcX80ywmp3uqcFy9/heIzQpDVI9+wZKMWfP+CVJxp70oIf4aHvk\nkElJRu5kobHqWh1TeiDYDoTMCMqgRgZUYhvB8LcBSEi5Sz4oMGOtlg/dyrdeBWVp\nNP/xztzoS+hD7OyrwSgXwXOXDn2v12zRHoFDt/fIQUz5bR+GetVlh75bAoGBALvu\nqS8HH/qPX57e95yOT6zJ8KyVUWM/OZm6M4dQynAu3kyPrUdmsLoS2YR36mBMnoZn\n1rLUrby5Dpik2iYxiBuf/rB4JfxwI5B9uaeh3pG/PXFYy+EiGPuj5eLEMGZbFZ0N\n8bWDuoNDnfSonz6q3f0u/5cD8m3QiikSsVcSr0JZAoGBAJxk1fSOXCy2GaaIytg1\nROKRQ+k5QFzHmFfS2MnxtyuqPr+Am2x6ddejtzMBh0wj0id7y5hNDRLtuAapK3Ds\nZxtVG0Tf5JhRTmBWATtsB6tNrB5z5+zbJ4HkweGUK+AsnF+0doP6fnyOVjVmKrf3\nNUoyV/N29ztLhQoVg1ka/JfI\n-----END PRIVATE KEY-----\n",
+#     "client_email": "documaticfrontend@documatic-f77e4.iam.gserviceaccount.com",
+#     "client_id": "114539149864439324892",
+#     "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+#     "token_uri": "https://oauth2.googleapis.com/token",
+#     "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+#     "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/documaticfrontend%40documatic-f77e4.iam.gserviceaccount.com",
+#     "universe_domain": "googleapis.com"
+#     })
+
+#         app = firebase_admin.initialize_app(cred)
+
+#         db = firestore.client()
+
+#         doc_ref = db.collection("link").document("backend")
+
+#         doc = doc_ref.get()
+#         if doc.exists:
+#             url = doc.to_dict()['link'] + "/upload"
+#             print(f"Document data: {url}")
+#         else:
+#             print("No such document!")
+
+#         app = QApplication(sys.argv)
+#         animation1_path = "Animation 1"
+#         animation2_path = "Animation 2"
+#         animation3_path = "Animation 3"
+#         animation4_path = "Animation 4"
+#         animation5_path = "Animation 5"
+#         window = InteractiveAnimation(animation1_path, animation2_path, animation3_path, animation4_path, animation5_path)
+#         window.show()
+#         sys.exit(app.exec_())
+#     except Exception as e:
+#         print(f"An error occurred: {str(e)}")
+#         input("Press Enter to exit...") 
+def get_resource_path(relative_path):
+    """Get absolute path to resource, works for dev and PyInstaller."""
+    if hasattr(sys, '_MEIPASS'):
+        # PyInstaller creates a temp folder and stores path in _MEIPASS
+        return os.path.join(sys._MEIPASS, relative_path)
+    return os.path.join(os.path.abspath("."), relative_path)
 if __name__ == "__main__":
-    app = QApplication(sys.argv)
-    animation1_path = "D:/SPECIAL/Animation 1"
-    animation2_path = "D:/SPECIAL/Animation 2"
-    animation3_path = "D:/SPECIAL/Animation 3"
-    animation4_path = "D:/SPECIAL/Animation 4"
-    animation5_path = "D:/SPECIAL/Animation 5"
-    window = InteractiveAnimation(animation1_path, animation2_path, animation3_path, animation4_path, animation5_path)
-    window.show()
-    sys.exit(app.exec_())
+    try:
+        # Print startup message
+        print("Application starting...")
+        logging.info("Initializing application components...")
+
+        # Firebase initialization
+        try:
+            configure_ssl()
+            print("SSL Configuration completed")
+            cred = credentials.Certificate("gcpKey.json")
+            logging.info("Firebase credentials loaded successfully")
+
+            app = firebase_admin.initialize_app(cred)
+            logging.info("Firebase app initialized")
+
+            db = firestore.client()
+            logging.info("Firestore client created")
+
+            doc_ref = db.collection("link").document("backend")
+            doc = doc_ref.get()
+            
+            if doc.exists:
+                url = doc.to_dict()['link'] + "/upload"
+                logging.info(f"Backend URL retrieved: {url}")
+            else:
+                logging.error("Backend URL document not found!")
+                print("Error: Could not retrieve backend URL")
+        except Exception as firebase_error:
+            logging.error(f"Firebase initialization error: {str(firebase_error)}")
+            print(f"Firebase Error: {str(firebase_error)}")
+            traceback.print_exc()
+            input("Press Enter to exit...")
+            sys.exit(1)
+
+        # Qt Application initialization
+        try:
+            print("Starting Qt application...")
+            app = QApplication(sys.argv)
+            
+            # Verify paths exist
+            paths = {
+                "Animation 1": get_resource_path("Animation 1"),
+                "Animation 2": get_resource_path("Animation 2"),
+                "Animation 3": get_resource_path("Animation 3"),
+                "Animation 4": get_resource_path("Animation 4"),
+                "Animation 5": get_resource_path("Animation 5")
+            }
+            
+            for name, path in paths.items():
+                if not os.path.exists(path):
+                    raise FileNotFoundError(f"Required directory not found: {path}")
+                logging.info(f"Found animation directory: {name}")
+
+            window = InteractiveAnimation(
+                paths["Animation 1"],
+                paths["Animation 2"],
+                paths["Animation 3"],
+                paths["Animation 4"],
+                paths["Animation 5"]
+            )
+            logging.info("Animation window created successfully")
+            
+            window.show()
+            logging.info("Window displayed - starting event loop")
+            
+            sys.exit(app.exec_())
+            
+        except Exception as qt_error:
+            logging.error(f"Qt application error: {str(qt_error)}")
+            print(f"Application Error: {str(qt_error)}")
+            traceback.print_exc()
+            input("Press Enter to exit...")
+            # sys.exit(1)
+            
+    except Exception as e:
+        logging.error(f"Critical error: {str(e)}")
+        print(f"Critical Error: {str(e)}")
+        traceback.print_exc()
+        input("Press Enter to exit...")

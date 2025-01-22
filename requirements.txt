@@ -1,0 +1,9 @@
+sys
+os
+requests
+mimetypes
+json
+PyQt5
+pillow
+firebase_admin
+wmi
