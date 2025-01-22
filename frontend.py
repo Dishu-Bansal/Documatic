@@ -4,9 +4,60 @@ import requests
 import mimetypes
 import json
 import certifi
+import tempfile
+import shutil
 import ssl
 import logging
 import traceback
+from packaging.version import Version
+
+CURRENT_VERSION = Version("0.0.1")
+METADATA_URL = "https://github.com/Dishu-Bansal/Documatic/blob/main/update.json"
+
+def check_for_updates():
+    try:
+        response = requests.get(METADATA_URL)
+        response.raise_for_status()
+        metadata = response.json()
+        latest_version = Version(metadata["version"])
+        if latest_version > CURRENT_VERSION:
+            return metadata["url"]
+        else:
+            return None
+    except Exception as e:
+        print(f"Error checking for updates: {e}")
+        return None
+
+def download_update(update_url, save_path):
+    try:
+        response = requests.get(update_url, stream=True)
+        response.raise_for_status()
+        with open(save_path, "wb") as f:
+            for chunk in response.iter_content(chunk_size=8192):
+                f.write(chunk)
+        print("Update downloaded successfully.")
+        return True
+    except Exception as e:
+        print(f"Error downloading update: {e}")
+        return False
+
+def replace_executable(new_executable_path):
+    current_executable = sys.executable
+    backup_path = current_executable + ".bak"
+
+    try:
+        # Create a backup of the current executable
+        shutil.move(current_executable, backup_path)
+        # Replace the executable
+        shutil.move(new_executable_path, current_executable)
+        print("Executable updated successfully.")
+    except Exception as e:
+        print(f"Error updating executable: {e}")
+        # Restore backup in case of failure
+        shutil.move(backup_path, current_executable)
+
+def restart_program():
+    os.execv(sys.executable, [sys.executable] + sys.argv)
 
 # Set up logging configuration
 logging.basicConfig(
@@ -884,6 +935,17 @@ def get_resource_path(relative_path):
     return os.path.join(os.path.abspath("."), relative_path)
 if __name__ == "__main__":
     try:
+        print("Checking for Updates...")
+        update_available = check_for_updates()
+        if update_available is not None:
+            print("Update available, Downloading...")
+            save_path = os.path.join(tempfile.gettempdir(), f"dockie_v{CURRENT_VERSION}.exe")
+            download = download_update(update_url=update_available, save_path=save_path)
+            if download:
+                print("Update Downloaded. Updating system files...")
+                replace_executable(save_path)
+                restart_program()
+
         # Print startup message
         print("Application starting...")
         logging.info("Initializing application components...")

@@ -2,7 +2,7 @@ import PyInstaller.__main__
 import os
 
 # Adjust these variables for your program
-PROGRAM_NAME = "Documatic"
+PROGRAM_NAME = "Dockie"
 MAIN_SCRIPT = "frontend.py"  # Your program's entry point
 ICON_PATH = "robo.ico"   # Optional: Path to your program's icon
 
