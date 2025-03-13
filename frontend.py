@@ -80,7 +80,7 @@ def configure_ssl():
     requests.packages.urllib3.util.ssl_.DEFAULT_CERTS = certifi.where()
 
 from PyQt5.QtWidgets import (
-    QApplication, QLabel, QMainWindow, QVBoxLayout, QLineEdit, QPushButton, QWidget, QDialog, QMessageBox
+    QApplication, QLabel, QMainWindow, QVBoxLayout, QLineEdit, QPushButton, QWidget, QDialog, QMessageBox, QProgressBar
 )
 from PyQt5.QtCore import QTimer, Qt, QThread, pyqtSignal, QPropertyAnimation
 from PyQt5.QtGui import QPixmap
@@ -97,6 +97,82 @@ system_info = c.Win32_ComputerSystemProduct()[0]
 id = system_info.UUID
 
 url = ""
+
+# Add a progress bar widget
+class ProgressBar(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        
+        layout = QVBoxLayout()
+        layout.setContentsMargins(0, 0, 0, 0)  # Remove margins
+        
+        # Create progress bar
+        self.progress = QProgressBar()
+        self.progress.setStyleSheet("""
+            QProgressBar {
+                border: none;
+                border-radius: 15px;
+                text-align: center;
+                background-color: rgba(200, 200, 200, 0.3);
+                min-height: 30px;
+                max-height: 30px;
+                font-size: 14px;
+                color: #333333;
+            }
+            
+            QProgressBar::chunk {
+                border-radius: 15px;
+                background: qlineargradient(
+                    x1:0, y1:0, x2:1, y2:0,
+                    stop:0 #9DC183,
+                    stop:1 #B5D89B
+                );
+            }
+        """)
+        self.progress.setFixedSize(250, 30)
+        
+        # Add a semi-transparent background panel
+        container = QWidget()
+        container.setStyleSheet("""
+            QWidget {
+                background-color: rgba(255, 255, 255, 0.95);
+                border-radius: 20px;
+                border: 1px solid rgba(157, 193, 131, 0.5);
+            }
+        """)
+        
+        container_layout = QVBoxLayout(container)
+        container_layout.setContentsMargins(10, 10, 10, 10)
+        container_layout.addWidget(self.progress)
+        
+        layout.addWidget(container)
+        self.setLayout(layout)
+        
+        # Set fixed size for the entire widget
+        self.setFixedSize(270, 50)
+
+        # layout.addWidget(self.progress)
+        # self.setLayout(layout)
+
+        # self.setFixedSize(self.progress.size())
+        
+    def set_progress(self, completed, total):
+        self.progress.setValue(completed)
+        self.progress.setMaximum(total)
+        # Set format to show "X/Y" instead of percentage
+        self.progress.setFormat(f"{completed}/{total}")
+    
+    # def showEvent(self, event):
+    #     """Center the progress bar when shown"""
+    #     if self.parent():
+    #         parent_rect = self.parent().rect()
+    #         x = parent_rect.center().x() - (self.width() // 2)
+    #         y = parent_rect.center().y() - (self.height() // 2)
+    #         self.move(x, y)
+    #     super().showEvent(event)
+    
 class APITask(QThread):
     """Handles API call to custom server"""
     completed = pyqtSignal(str)
@@ -134,7 +210,8 @@ class APITask(QThread):
                     response = requests.post(
                         url, 
                         data=payload, 
-                        files=files
+                        files=files,
+                        verify=False
                     )
             else:
                 response = requests.post(
@@ -150,11 +227,11 @@ class APITask(QThread):
             self.completed.emit(api_response)
 
         except requests.RequestException as e:
-            self.completed.emit("API Error")
-            #self.error.emit(f"API Request Error: {str(e)}")
+            #self.completed.emit("API Error")
+            self.error.emit(f"API Request Error: {str(e)}")
         except Exception as e:
-            self.completed.emit("Unexpected Error")
-            #self.error.emit(f"Unexpected Error: {str(e)}")
+            #self.completed.emit("Unexpected Error")
+            self.error.emit(f"Unexpected Error: {str(e)}")
 
 class TextInputDialog(QDialog):
     def __init__(self, parent=None, file_desc=False):
@@ -216,32 +293,11 @@ class TextInputDialog(QDialog):
         self.activateWindow()
         self.text_input.activateWindow()
         return super().exec_()
-# class TextInputDialog(QDialog):
-#     def __init__(self, parent=None):
-#         super().__init__(parent)
-#         self.setWindowTitle("Enter Message")
-#         self.setGeometry(100, 100, 300, 150)
-        
-#         layout = QVBoxLayout()
-        
-#         # Text box
-#         self.text_input = QLineEdit()
-#         self.text_input.setPlaceholderText("Enter your message here...")
-#         layout.addWidget(self.text_input)
-        
-#         # Send button
-#         send_button = QPushButton("Send")
-#         send_button.clicked.connect(self.accept)
-#         layout.addWidget(send_button)
-        
-#         # Cancel button
-#         cancel_button = QPushButton("Cancel")
-#         cancel_button.clicked.connect(self.reject)
-#         layout.addWidget(cancel_button)
-        
-#         self.setLayout(layout)
 
 class InteractiveAnimation(QLabel):
+
+    progress = pyqtSignal(int, int)
+
     def __init__(self, animation1_path, animation2_path, animation3_path, animation4_path, animation5_path):
         super().__init__()
 
@@ -256,7 +312,13 @@ class InteractiveAnimation(QLabel):
         self.downloading_file = False
         self.api_task = None
         self.dragged_file_path = None
-        self.found_file = [] 
+        self.found_file = []
+        self.dropped_files = [] 
+        # Initialize progress bar as None
+        self.progress_bar = None
+        
+        # Connect the progress signal to update_progress_bar method
+        self.progress.connect(self.update_progress_bar)
 
         # Load animation files
         self.animation1_files = sorted(
@@ -357,6 +419,12 @@ class InteractiveAnimation(QLabel):
         screen_geometry = QApplication.primaryScreen().geometry()
         self.move(screen_geometry.width() - self.width(), 0)
 
+    def update_progress_bar(self, completed, total):
+        """Update the progress bar value and ensure it's visible"""
+        if self.progress_bar and self.progress_bar.isVisible():
+            self.progress_bar.set_progress(completed, total)
+            self.progress_bar.raise_()
+
     def set_frame(self, frame):
         """Update the QLabel to show the specified frame."""
         try:
@@ -442,7 +510,10 @@ class InteractiveAnimation(QLabel):
                 self.set_frame(self.current_frame)
             else:
                 # Reached end of animation 2, show text input
-                self.show_text_input(True)
+                if len(self.dropped_files) > 1:
+                    self.process_files()
+                else:
+                    self.show_text_input(True)
 
         elif self.current_state == self.AnimationState.ANIMATION2_REVERSE:
             # Reverse animation 2
@@ -563,10 +634,58 @@ class InteractiveAnimation(QLabel):
             self.current_animation = self.animation1_files
             self.total_frames = len(self.current_animation)
             self.current_frame = 0  # Start from beginning of animation
-            self.dragged_file_path = event.mimeData().urls()[0].toLocalFile()
+            #self.dragged_file_path = event.mimeData().urls()[0].toLocalFile()
         else:
             event.ignore()
 
+    def get_files_from_directory(self, directory):
+        """Recursively get all files in a directory."""
+        files = []
+        for root, dirs, files_in_dir in os.walk(directory):
+            for file in files_in_dir:
+                files.append(os.path.join(root, file))
+        return files
+
+    def process_files(self):
+        """Process the files one by one."""
+        if self.dropped_files:
+            
+            if not self.progress_bar:
+                self.progress_bar = ProgressBar(self)
+                # Calculate the center position relative to the main window
+                self.progress_bar.move(
+                (self.x() + (self.width() - self.progress_bar.width()) // 2) - self.width() // 64,
+                (self.y() + (self.height() - self.progress_bar.height()) // 2) + 50
+                )
+                self.progress_bar.show()
+            
+            self.progress_bar.show()
+            self.progress_bar.raise_()
+
+            self.progress.connect(self.progress_bar.set_progress)
+
+            self.current_state = self.AnimationState.ANIMATION3_FORWARD
+            self.current_animation = self.animation3_files
+            self.total_frames = len(self.current_animation)
+            self.current_frame = 0
+
+            # Process the first file
+            self.completed_files = 0
+            self.progress.emit(self.completed_files, self.total_files)
+            self.handle_file(self.dropped_files.pop(0))
+
+    def handle_file(self, file_path):
+        """Handle the individual file by calling the API or any other operation."""
+        self.dragged_file_path = file_path
+        # You can replace this with your actual logic for handling each file
+        print(f"Processing file: {file_path}")
+
+        # Example: Start an API task for the file
+        self.api_task = APITask("", file_path)
+        self.api_task.completed.connect(self.on_api_complete)
+        self.api_task.error.connect(self.on_api_error)
+        self.api_task.start()
+    
     def dragLeaveEvent(self, event):
         """Handle drag leave event."""
         if self.current_state in [self.AnimationState.DRAGGING_FORWARD, self.AnimationState.DRAGGING_REVERSE]:
@@ -578,12 +697,33 @@ class InteractiveAnimation(QLabel):
         """Handle file drop event."""
         if event.mimeData().hasUrls():
             event.accept()
+
+            # Clear previous files
+            self.dropped_files.clear()
+
+            # Loop through the URLs (could be files or directories)
+            for url in event.mimeData().urls():
+                path = url.toLocalFile()
+                if os.path.isdir(path):
+                    # If it's a directory, add only valid files in it
+                    for root, _, files in os.walk(path):
+                        for file in files:
+                            file_path = os.path.join(root, file)
+                            if self.is_valid_file_type(file_path):
+                                self.dropped_files.append(file_path)
+                else:
+                    # For single files, add only if valid type
+                    if self.is_valid_file_type(path):
+                        self.dropped_files.append(path)
+            
+            self.total_files = len(self.dropped_files)
             # If file is dropped, switch to full forward animation
-            if self.current_state in [self.AnimationState.DRAGGING_FORWARD, self.AnimationState.DRAGGING_REVERSE]:
-                self.current_state = self.AnimationState.ANIMATION1_FORWARD
-                self.current_animation = self.animation1_files
-                self.total_frames = len(self.current_animation)
-                self.current_frame = self.current_frame  # Continue from current frame
+            # if self.current_state in [self.AnimationState.DRAGGING_FORWARD, self.AnimationState.DRAGGING_REVERSE]:
+            #     self.current_state = self.AnimationState.ANIMATION1_FORWARD
+            #     self.current_animation = self.animation1_files
+            #     self.total_frames = len(self.current_animation)
+            #     self.current_frame = self.current_frame  # Continue from current frame
+            self.trigger_drop_event()
 
     def mouseDoubleClickEvent(self, event):
         """Handle double-click event to open text input dialog."""
@@ -592,6 +732,22 @@ class InteractiveAnimation(QLabel):
             if self.current_state in [self.AnimationState.IDLE, self.AnimationState.ANIMATION5_FORWARD]:
                 self.show_text_input(False)
         
+    def is_valid_file_type(self, file_path):
+        """Check if file is PDF or image."""
+        valid_extensions = {'.pdf', '.jpg', '.jpeg', '.png'}
+        mime_type, _ = mimetypes.guess_type(file_path)
+        
+        # Check file extension
+        file_extension = os.path.splitext(file_path)[1].lower()
+        
+        # Check MIME type
+        is_valid = False
+        if mime_type:
+            is_valid = mime_type.startswith('image/') or mime_type == 'application/pdf'
+        
+        # Also check extension as fallback
+        return is_valid or file_extension in valid_extensions
+
     def trigger_drop_event(self):
         """Trigger the drop event logic."""
         # Switch to animation 2
@@ -619,10 +775,11 @@ class InteractiveAnimation(QLabel):
     def send_message(self, message):
         """Handle the send button click event."""
         print(f"Message sent: {message}")
-        print(f"Attached file: {self.dragged_file_path}")
+        print(f"Attached file: {str(self.dropped_files[0])}")
 
         # Start API task
-        self.api_task = APITask(message, self.dragged_file_path)
+        self.completed_files = 0
+        self.api_task = APITask(message, self.dropped_files.pop(0))
         self.api_task.completed.connect(self.on_api_complete)
         self.api_task.error.connect(self.on_api_error)
 
@@ -630,7 +787,7 @@ class InteractiveAnimation(QLabel):
         # self.async_task = AsyncTask()
         # self.async_task.completed.connect(self.on_async_complete)
         
-        if self.dragged_file_path is None:
+        if self.dropped_files is None:
             self.current_state = self.AnimationState.ANIMATION5_REVERSE
             self.current_animation = self.animation5_files
             self.total_frames = len(self.current_animation)
@@ -651,58 +808,68 @@ class InteractiveAnimation(QLabel):
         #response = '{"got_file":"true","text":{"1":["Indian License.pdf","D:/Google Drive Backup/Indian License.pdf",0.42617275124563175],"2":["Coop Work Permit.pdf","D:/Google Drive Backup/Personal Documents/Coop Work Permit.pdf",0.40544333474915667],"3":["Passport.pdf","D:/Google Drive Backup/Personal Documents/Passport.pdf",0.34395519393947965]}}'
         print("API Response:", response)
         
-        # Show response in a message box (you could customize this)
-        # msg_box = QMessageBox()
-        # msg_box.setText("Server Response:")
-        # msg_box.setInformativeText(response)
-        # msg_box.exec_()
+        if self.dropped_files:
+            self.completed_files += 1
+            self.progress.emit(self.completed_files, self.total_files)
 
-        # Set async task completed flag
-        self.async_task_completed = True
+            next_file = self.dropped_files.pop(0)
+            self.handle_file(next_file)
+        else:
+            # Show response in a message box (you could customize this)
+            # msg_box = QMessageBox()
+            # msg_box.setText("Server Response:")
+            # msg_box.setInformativeText(response)
+            # msg_box.exec_()
+            self.dragged_file_path = None
+            if self.progress_bar:
+                self.progress_bar.hide()
+                self.progress_bar = None
+            # Set async task completed flag
+            self.async_task_completed = True
 
-        def get_top_match(res):
-            if 'got_file' in res:
-                files = res['text']
-                # score1, score2 = 0, 0
-                # file1, file2 = "", ""
-                # name1, name2 = "", ""
-                
-                # def get_first_number(string):
-                #     import re
-                #     match = re.search(r'\d+', string)
-                #     return int(match.group()) if match else None
-                
-                # for file in files[:-1]:
-                #     name, path, score = file.replace("(", "").replace(")", "").split(",")
-                #     num = get_first_number(score)
-                #     if num >= score1:
-                #         score2, score1 = score1, num
-                #         file2, file1 = file1, path.strip()
-                #         name2, name1 = name1, name.strip()
-                # return file1
-                result = []
-                if '1' in files:
-                    name1, path1, score1 = files['1']
-                    result += [path1]
-                if '2' in files:
-                    name2, path2, score2 = files['2']
-                    result += [path2]
-                if '3' in files:
-                    name3, path3, score3 = files['3']
-                    result += [path3]
-                return result
-                # name2, path2, score2 = files['2']
-                # name3, path3, score3 = files['3']
-            return []
-    
-
-        self.found_file = get_top_match(json.loads(response))
-        print("Found files: " + str(self.found_file))
+            def get_top_match(res):
+                if 'got_file' in res:
+                    files = res['text']
+                    # score1, score2 = 0, 0
+                    # file1, file2 = "", ""
+                    # name1, name2 = "", ""
+                    
+                    # def get_first_number(string):
+                    #     import re
+                    #     match = re.search(r'\d+', string)
+                    #     return int(match.group()) if match else None
+                    
+                    # for file in files[:-1]:
+                    #     name, path, score = file.replace("(", "").replace(")", "").split(",")
+                    #     num = get_first_number(score)
+                    #     if num >= score1:
+                    #         score2, score1 = score1, num
+                    #         file2, file1 = file1, path.strip()
+                    #         name2, name1 = name1, name.strip()
+                    # return file1
+                    result = []
+                    if '1' in files:
+                        name1, path1, score1 = files['1']
+                        result += [path1]
+                    if '2' in files:
+                        name2, path2, score2 = files['2']
+                        result += [path2]
+                    if '3' in files:
+                        name3, path3, score3 = files['3']
+                        result += [path3]
+                    return result
+                    # name2, path2, score2 = files['2']
+                    # name3, path3, score3 = files['3']
+                return []
         
-        # Clean up API task
-        if self.api_task:
-            self.api_task.deleteLater()
-            self.api_task = None
+
+            self.found_file = get_top_match(json.loads(response))
+            print("Found files: " + str(self.found_file))
+            
+            # Clean up API task
+            if self.api_task:
+                self.api_task.deleteLater()
+                self.api_task = None
 
     def on_api_error(self, error):
         """Handle API call error."""
@@ -714,6 +881,9 @@ class InteractiveAnimation(QLabel):
         # msg_box.setText("Server API Call Error")
         # msg_box.setInformativeText(error)
         # msg_box.exec_()
+        if self.progress_bar:
+            self.progress_bar.hide()
+            self.progress_bar = None
 
         self.async_task_completed = None
         # Reset to idle state
@@ -851,104 +1021,29 @@ class FileToast(QWidget):
         self.anim.finished.connect(self.close)
         self.anim.start()
 
-# Usage
-# def show_matches(response):
-#     files = get_top_matches(response, num_matches=3)
-#     toast = FileToast(files)
-#     toast.show()
-# class TextInputDialog(QDialog):
-#     def __init__(self, parent=None):
-#         super().__init__(parent)
-#         self.setWindowTitle("Enter Message")
-#         self.setGeometry(100, 100, 300, 150)
-        
-#         layout = QVBoxLayout()
-        
-#         # Text box
-#         self.text_input = QLineEdit()
-#         self.text_input.setPlaceholderText("Enter your message here...")
-#         layout.addWidget(self.text_input)
-        
-#         # Send button
-#         send_button = QPushButton("Send")
-#         send_button.clicked.connect(self.accept)
-#         layout.addWidget(send_button)
-        
-#         # Cancel button
-#         cancel_button = QPushButton("Cancel")
-#         cancel_button.clicked.connect(self.reject)
-#         layout.addWidget(cancel_button)
-        
-#         self.setLayout(layout)
-    
-#     def get_message(self):
-#         return self.text_input.text()
-
-
-# if __name__ == "__main__":
-#     try:
-#         # Use a service account.
-#         cred = credentials.Certificate({
-#     "type": "service_account",
-#     "project_id": "documatic-f77e4",
-#     "private_key_id": "70ac6a1a20961a1203fa3f9455c8a2ad2b6980a7",
-#     "private_key": "-----BEGIN PRIVATE KEY-----\nMIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQCy3Xv5OkyM6WL4\n6oRAMrR2CjsOh+5uXBLwvX6Ah4g8TfKDy9HK9/qEZN5VdaYn8mooy8F1j7qoorAI\na4ano0RzYFT4BGw0gkg7kZ/g21QNj7/U3wYMnBAafWFD69ihMtEXkNKnXYWmDJ2q\nY4gE4PHnxtao801njj7NRSa7hyO4uCNQ3AST5n75APs+ftmnzrotlzEFgzB3lZ/n\nrsc5RqH6c9aIfM+wMdJtTJC9XsVrtMX82gxIkilIzXAsqwDUtoglj56W0G0fAx/S\n/g7rxgWPSJjnwHni7KrtQx7tEEBJB3fN9mV02FP9RV7FwetMyOzKo3CDkYKRyEQQ\nvfWAQxijAgMBAAECggEAUexR+Q/zueK3myzG0CSpNRtwezJVSaTQZAVW6IWrJ3vI\nJQd4mo9D5dnRX7EYHlnQt8jDXhYrt0t0dxbQwP1tv66SnFpiORanAOmtIa8za1a4\n1UYlHido1MkygIqIWSTOUg3Z/iA+s5Q5rq4RwbJJ+g+/h/iQLmsfZqNSnzfBa7ve\nuEazWothr40lc/zwv99DDc+zPKUi9mAXOt/I7w/q0AR47rXPhLZ5VUGoSDTupBv7\nqkLNXVlbg3CyCWkJuxoxA9yMCQidka+VUJpL3P5fwo5EtETABOJwiQjgbBvS83rV\n+kAFhvzD+HROr3s6ZFJ3SK1XF9Yc+GzrDwy4LpGQeQKBgQDkeCj0FPANDBk1bMP/\nSKgn4kILcu7HEfB3NPIWVmwH8aYj5P5fsmlrVR+wxBY91KfXj7AJNCPqBAM5bLd9\nBwYOsdSqPjuYr4z7fuoPVEdVcq4GoIltMAggnTeeHMLnMLyM4dylejX+rFBYBl1Q\nzYwXGVU4Cv7vyVf631i6K68rtwKBgQDIayFXUrO3UFlfUGZ9x4OKkRs6tAiqw34I\nmOMWgSlFCAiUOXYT3KzdIZUST2TNjIm/dTg05uqaNbffnyrC4zl3e0Xxv5dxZC99\n5tTS5mPXoia+Xa8LDCGMslUXenGRbEzZiCwSL2fuMj5eygUt35OogePqL7Y5YfPc\nB0Zqk2jSdQKBgFcX80ywmp3uqcFy9/heIzQpDVI9+wZKMWfP+CVJxp70oIf4aHvk\nkElJRu5kobHqWh1TeiDYDoTMCMqgRgZUYhvB8LcBSEi5Sz4oMGOtlg/dyrdeBWVp\nNP/xztzoS+hD7OyrwSgXwXOXDn2v12zRHoFDt/fIQUz5bR+GetVlh75bAoGBALvu\nqS8HH/qPX57e95yOT6zJ8KyVUWM/OZm6M4dQynAu3kyPrUdmsLoS2YR36mBMnoZn\n1rLUrby5Dpik2iYxiBuf/rB4JfxwI5B9uaeh3pG/PXFYy+EiGPuj5eLEMGZbFZ0N\n8bWDuoNDnfSonz6q3f0u/5cD8m3QiikSsVcSr0JZAoGBAJxk1fSOXCy2GaaIytg1\nROKRQ+k5QFzHmFfS2MnxtyuqPr+Am2x6ddejtzMBh0wj0id7y5hNDRLtuAapK3Ds\nZxtVG0Tf5JhRTmBWATtsB6tNrB5z5+zbJ4HkweGUK+AsnF+0doP6fnyOVjVmKrf3\nNUoyV/N29ztLhQoVg1ka/JfI\n-----END PRIVATE KEY-----\n",
-#     "client_email": "documaticfrontend@documatic-f77e4.iam.gserviceaccount.com",
-#     "client_id": "114539149864439324892",
-#     "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-#     "token_uri": "https://oauth2.googleapis.com/token",
-#     "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
-#     "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/documaticfrontend%40documatic-f77e4.iam.gserviceaccount.com",
-#     "universe_domain": "googleapis.com"
-#     })
-
-#         app = firebase_admin.initialize_app(cred)
-
-#         db = firestore.client()
-
-#         doc_ref = db.collection("link").document("backend")
-
-#         doc = doc_ref.get()
-#         if doc.exists:
-#             url = doc.to_dict()['link'] + "/upload"
-#             print(f"Document data: {url}")
-#         else:
-#             print("No such document!")
-
-#         app = QApplication(sys.argv)
-#         animation1_path = "Animation 1"
-#         animation2_path = "Animation 2"
-#         animation3_path = "Animation 3"
-#         animation4_path = "Animation 4"
-#         animation5_path = "Animation 5"
-#         window = InteractiveAnimation(animation1_path, animation2_path, animation3_path, animation4_path, animation5_path)
-#         window.show()
-#         sys.exit(app.exec_())
-#     except Exception as e:
-#         print(f"An error occurred: {str(e)}")
-#         input("Press Enter to exit...") 
 def get_resource_path(relative_path):
     """Get absolute path to resource, works for dev and PyInstaller."""
     if hasattr(sys, '_MEIPASS'):
         # PyInstaller creates a temp folder and stores path in _MEIPASS
         return os.path.join(sys._MEIPASS, relative_path)
     return os.path.join(os.path.abspath("."), relative_path)
+
 if __name__ == "__main__":
     try:
-        print("Checking for Updates...")
-        update_available = check_for_updates()
-        if update_available is not None:
-            print("Update available, Downloading...")
-            save_path = os.path.join(tempfile.gettempdir(), f"dockie_v{CURRENT_VERSION}.exe")
-            download = download_update(update_url=update_available, save_path=save_path)
-            if download:
-                print("Update Downloaded. Updating system files...")
-                replace_executable(save_path)
-                restart_program()
+        # print("Checking for Updates...")
+        # update_available = check_for_updates()
+        # if update_available is not None:
+        #     print("Update available, Downloading...")
+        #     save_path = os.path.join(tempfile.gettempdir(), f"dockie_v{CURRENT_VERSION}.exe")
+        #     download = download_update(update_url=update_available, save_path=save_path)
+        #     if download:
+        #         print("Update Downloaded. Updating system files...")
+        #         replace_executable(save_path)
+        #         restart_program()
 
-        # Print startup message
-        print("Application starting...")
-        logging.info("Initializing application components...")
+        # # Print startup message
+        # print("Application starting...")
+        # logging.info("Initializing application components...")
 
         # Firebase initialization
         try:
