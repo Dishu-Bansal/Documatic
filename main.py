@@ -11,7 +11,7 @@ import logging
 import traceback, zipfile, requests, subprocess
 from packaging.version import Version
 
-CURRENT_VERSION = Version("0.0.1")
+CURRENT_VERSION = Version("0.0.2")
 METADATA_URL = "https://raw.githubusercontent.com/Dishu-Bansal/Documatic/refs/heads/main/update.json"
 UPDATE_URL = None
 
@@ -54,7 +54,8 @@ def apply_update():
 
 def restart_main():
     print("Update Complete! Restarting...")
-    subprocess.Popen(["python", "main.py"])
+    python_executable = sys.executable  # Use the current Python environment
+    subprocess.Popen([python_executable, "main.py"])
     sys.exit()
 
 def auto_update():
