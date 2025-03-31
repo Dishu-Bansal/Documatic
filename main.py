@@ -6,13 +6,37 @@ import zipfile, requests
 from packaging.version import Version
 import time
 import psutil  # You may need to install this: pip install psutil
+import pystray, threading
+from PIL import Image
 
-CURRENT_VERSION = Version("0.0.3")
+CURRENT_VERSION = Version("0.0.1")
 METADATA_URL = "https://raw.githubusercontent.com/Dishu-Bansal/Documatic/refs/heads/main/update.json"
 UPDATE_URL = None
 process_names = []
 identifier_ui = "--dockie_ui"          # Unique identifier for new_ui.py
 identifier_ui2 = "--dockie_ui2"        # Unique identifier for new_ui2.py
+
+def create_system_tray():
+    # Load an icon (you should replace this with your app's icon)
+    image = Image.open("icon.png")
+    
+    # Define what happens when the icon is clicked
+    def on_clicked(icon, item):
+        if str(item) == "Exit":
+            icon.stop()
+            # Add any cleanup code here before your application exits
+    
+    # Create a menu with a few options
+    menu = pystray.Menu(
+        pystray.MenuItem("Show Status", lambda: print("Application is running")),
+        pystray.MenuItem("Exit", on_clicked)
+    )
+    
+    # Create the icon
+    icon = pystray.Icon("app_name", image, "My Background App", menu)
+    
+    # Run the icon - this will block, so we'll run it in a separate thread
+    icon.run()
 
 def check_for_updates():
     try:
@@ -42,42 +66,77 @@ def download_update():
 
 def apply_update():
     print("Applying Update...")
+    
+    # Create backup of main.py before updating
+    if os.path.exists("main.py"):
+        shutil.copy2("main.py", "main.py.backup")
+    
+    # Extract the update zip
     with zipfile.ZipFile("update.zip", "r") as zip_ref:
         zip_ref.extractall("update_temp")
-
+    
+    # Function to update a specific folder
     def update_folder(name):
-        # Check if the update has a top-level folder named "dockie"
         update_folder = os.path.join("update_temp", name)
         if os.path.isdir(update_folder):
-            # Remove the existing "dockie" folder if it exists.
             if os.path.exists(name):
                 shutil.rmtree(name)
-            # Move the new folder in place.
             shutil.move(update_folder, name)
-        else:
-            # If there's no top-level folder named "dockie", move all extracted files.
-            for item in os.listdir("update_temp"):
-                src = os.path.join("update_temp", item)
-                dst = item
-                # Remove the destination if it already exists.
-                if os.path.exists(dst):
-                    if os.path.isdir(dst):
-                        shutil.rmtree(dst)
-                    else:
-                        os.remove(dst)
-                shutil.move(src, dst)
+    
+    # Update the specific folders
     update_folder("dockie")
     update_folder("dockiedrop")
-
+    
+    # Update main.py and other root files
+    for item in os.listdir("update_temp"):
+        src = os.path.join("update_temp", item)
+        dst = item
+        
+        # Skip directories we've already handled
+        if item in ["dockie", "dockiedrop"]:
+            continue
+            
+        # For files, replace existing ones
+        if os.path.isfile(src):
+            if os.path.exists(dst):
+                os.remove(dst)
+            shutil.move(src, dst)
+    
+    # Clean up
     shutil.rmtree("update_temp")
     os.remove("update.zip")
+    
+    # Remove backup after successful update
+    if os.path.exists("main.py.backup"):
+        os.remove("main.py.backup")
 
 def restart_main():
     print("Update Complete! Restarting...")
     python_executable = sys.executable  # Use the current Python environment
-    # Use direct OS command
-    os.system(f'"{python_executable}" "main.py"')
-    sys.exit()
+    
+    # Use execv to replace the current process with a new one
+    # This keeps everything in the same terminal window
+    print(f"Restarting in the same window with: {python_executable} main.py")
+    
+    # Get the path to main.py
+    main_script_path = os.path.abspath("main.py")
+    
+    # On Windows, use a different approach since execv behaves differently
+    if os.name == 'nt':  # Windows
+        # Create a batch file that will restart the application
+        with open("restart_temp.bat", "w") as batch_file:
+            batch_file.write(f'@echo off\n')
+            batch_file.write(f'"{python_executable}" "{main_script_path}"\n')
+        
+        # Execute the batch file and exit this process
+        os.system("start /b restart_temp.bat & exit")
+    else:  # Unix/Linux/MacOS
+        # Replace the current process with the new one
+        os.execv(python_executable, [python_executable, main_script_path])
+    
+    # This point should not be reached on Unix systems
+    # On Windows, we need to exit manually
+    sys.exit(0)
 
 def auto_update():
     global UPDATE_URL
@@ -177,5 +236,19 @@ def main():
         kill_process_by_script("new_ui.py", identifier_ui)
         kill_process_by_script("new_ui2.py", identifier_ui2)
 
-if __name__ == "__main__":
+def background_task():
+    # This is where your actual background application logic goes
     auto_update()
+
+if __name__ == "__main__":
+     # Start the background task in a separate thread
+    bg_thread = threading.Thread(target=background_task, daemon=True)
+    bg_thread.start()
+    
+    # Create and start the system tray icon in the main thread
+    create_system_tray()
+    
+    # The program will exit when the icon is stopped
+    kill_process_by_script("new_ui.py", identifier_ui)
+    kill_process_by_script("new_ui2.py", identifier_ui2)
+    sys.exit(0)

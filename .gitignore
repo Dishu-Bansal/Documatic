@@ -11,3 +11,5 @@ Flair Airlines.pdf
 temporary/*
 test.ipynb
 debug_log.txt
+backup/*
+restart_temp.bat

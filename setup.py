@@ -32,6 +32,7 @@ setup(
         'keyboard',
         'win32gui',
         'win32process',
-        'pynput'
+        'pynput',
+        'pystray'
     ],
 )
