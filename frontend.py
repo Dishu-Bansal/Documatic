@@ -186,6 +186,9 @@ class APITask(QThread):
     def run(self):
         """Make API call to custom server"""
         try:
+            global url, id
+            print("URL is " + url)
+            print("Device is " + id)
             # Prepare the API endpoint
             # url = "https://c71d-69-30-85-116.ngrok-free.app/upload"  # Replace with your actual server URL
 
@@ -1028,6 +1031,28 @@ def get_resource_path(relative_path):
         return os.path.join(sys._MEIPASS, relative_path)
     return os.path.join(os.path.abspath("."), relative_path)
 
+def setupAPI():
+    global url
+    configure_ssl()
+    print("SSL Configuration completed")
+    cred = credentials.Certificate(get_resource_path("gcpKey.json"))
+    logging.info("Firebase credentials loaded successfully")
+
+    app = firebase_admin.initialize_app(cred)
+    logging.info("Firebase app initialized")
+
+    db = firestore.client()
+    logging.info("Firestore client created")
+
+    doc_ref = db.collection("link").document("backend")
+    doc = doc_ref.get()
+    
+    if doc.exists:
+        url = doc.to_dict()['link'] + "/upload"
+        logging.info(f"Backend URL retrieved: {url}")
+    else:
+        logging.error("Backend URL document not found!")
+        print("Error: Could not retrieve backend URL")
 if __name__ == "__main__":
     try:
         # print("Checking for Updates...")
@@ -1047,26 +1072,7 @@ if __name__ == "__main__":
 
         # Firebase initialization
         try:
-            configure_ssl()
-            print("SSL Configuration completed")
-            cred = credentials.Certificate(get_resource_path("gcpKey.json"))
-            logging.info("Firebase credentials loaded successfully")
-
-            app = firebase_admin.initialize_app(cred)
-            logging.info("Firebase app initialized")
-
-            db = firestore.client()
-            logging.info("Firestore client created")
-
-            doc_ref = db.collection("link").document("backend")
-            doc = doc_ref.get()
-            
-            if doc.exists:
-                url = doc.to_dict()['link'] + "/upload"
-                logging.info(f"Backend URL retrieved: {url}")
-            else:
-                logging.error("Backend URL document not found!")
-                print("Error: Could not retrieve backend URL")
+            setupAPI()
         except Exception as firebase_error:
             logging.error(f"Firebase initialization error: {str(firebase_error)}")
             print(f"Firebase Error: {str(firebase_error)}")

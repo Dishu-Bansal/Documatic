@@ -1,4 +1,22 @@
 {
-    "version": "0.0.7",
-    "url": "https://github.com/Dishu-Bansal/Documatic/raw/refs/heads/main/dist/Dockie.exe"
+    "dockie":
+        {
+            "version": "0.0.1",
+            "url": "https://github.com/Dishu-Bansal/Documatic/raw/refs/heads/main/dist/Dockie.exe"
+        },
+    "dockie_drop":
+        {
+            "version": "0.0.1",
+            "url": "https://github.com/Dishu-Bansal/Documatic/raw/refs/heads/main/dist/Dockie.exe"
+        },
+    "dockie_ui":
+        {
+            "version": "0.0.1",
+            "url": "https://github.com/Dishu-Bansal/Documatic/raw/refs/heads/main/dist/Dockie.exe"
+        },
+    "dockie_drop_ui":
+        {
+            "version": "0.0.1",
+            "url": "https://github.com/Dishu-Bansal/Documatic/raw/refs/heads/main/dist/Dockie.exe"
+        }
 }
