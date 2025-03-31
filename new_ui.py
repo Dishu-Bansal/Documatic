@@ -7,15 +7,27 @@ import mimetypes
 import logging
 import certifi
 import ssl, json
-from PyQt5.QtWidgets import QApplication
-from PyQt5.QtCore import QThread, pyqtSignal, QObject, QEventLoop, QTimer
+from PyQt5.QtWidgets import QApplication, QVBoxLayout, QWidget, QLabel, QPushButton
+from PyQt5.QtCore import QThread, Qt, pyqtSignal, QEventLoop, QTimer, QPropertyAnimation
 import firebase_admin
 from firebase_admin import credentials
 from firebase_admin import firestore
 import wmi
-import keyboard
-from frontend import FileToast
+import keyboard, threading
+import psutil  # pip install psutil
 
+def monitor_parent(poll_interval=1):
+    """
+    Monitor the parent process. If the parent process is no longer running,
+    exit the child process.
+    """
+    parent_pid = os.getppid()
+    while True:
+        # If parent process ID becomes 1 (or doesn't exist), it means the original parent is gone.
+        if parent_pid == 1 or not psutil.pid_exists(parent_pid):
+            print("Main process terminated. Exiting child process.")
+            break
+        time.sleep(poll_interval)
 # Configure logging
 logging.basicConfig(level=logging.DEBUG, 
                     format='%(asctime)s - %(levelname)s - %(message)s',
@@ -32,6 +44,97 @@ system_info = c.Win32_ComputerSystemProduct()[0]
 id = system_info.UUID
 
 url = ""
+
+class FileToast(QWidget):
+    def __init__(self, files):
+        super().__init__()
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        
+        layout = QVBoxLayout()
+        layout.setContentsMargins(10, 10, 10, 10)
+        
+        # Create toast content
+        container = QWidget()
+        container.setStyleSheet("""
+            QWidget {
+                background-color: rgba(255, 255, 255, 0.95);
+                border-radius: 8px;
+                border: 1px solid #ccc;
+            }
+            QPushButton {
+                border: none;
+                padding: 5px;
+                text-align: left;
+            }
+            QPushButton:hover {
+                background-color: #e6e6e6;
+                border-radius: 4px;
+            }
+        """)
+        
+        if os.path.exists(files[0]):
+            os.startfile(files[0])
+
+        toast_layout = QVBoxLayout(container)
+        
+        # Add header
+        header = QLabel("Found these matches:")
+        header.setStyleSheet("font-weight: bold; padding: 5px;")
+        toast_layout.addWidget(header)
+        
+        # Add file buttons
+        for i, file in enumerate(files):
+            btn = QPushButton(f"{i+1}. {os.path.basename(file)}")
+            btn.clicked.connect(lambda checked, f=file: self.open_file(f))
+            toast_layout.addWidget(btn)
+        
+        # Add extra buttons, in case result has less than 3 files, for Consistent UI
+        if len(files) < 3:
+            for i in range(3 - len(files)):
+                btn = QPushButton("")
+                toast_layout.addWidget(btn)
+        
+        # Add open all button
+        open_all = QPushButton("Open All")
+        open_all.setStyleSheet("color: blue;")
+        open_all.clicked.connect(lambda: self.open_all(files))
+        toast_layout.addWidget(open_all)
+        
+        layout.addWidget(container)
+        self.setLayout(layout)
+        
+        # Position toast
+        self.position_toast()
+        
+        # Auto-hide timer
+        QTimer.singleShot(5000, self.fade_out)
+    
+    def position_toast(self):
+        screen = QApplication.primaryScreen().geometry()
+        self.setGeometry(
+            screen.width() - 300 - 20,  # 20px from right
+            screen.height() - 200 - 20,  # 20px from bottom
+            300,  # width
+            200   # height
+        )
+    
+    def open_file(self, file):
+        os.startfile(file)
+        self.close()
+    
+    def open_all(self, files):
+        for file in files:
+            os.startfile(file)
+        self.close()
+    
+    def fade_out(self):
+        self.anim = QPropertyAnimation(self, b"windowOpacity")
+        self.anim.setDuration(500)
+        self.anim.setStartValue(1.0)
+        self.anim.setEndValue(0.0)
+        self.anim.finished.connect(self.close)
+        self.anim.start()
 
 def configure_ssl():
     """Configure SSL certificate path for requests"""
@@ -291,6 +394,9 @@ def on_shift_press(event):
         last_shift_press_time = current_time
 
 def main():
+    monitor_thread = threading.Thread(target=monitor_parent, daemon=True)
+    monitor_thread.start()
+
     logging.info("Application starting")
     keyboard.on_press_key("shift", on_shift_press)
     print("Listening for Shift key presses...")

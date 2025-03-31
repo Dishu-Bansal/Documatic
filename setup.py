@@ -23,6 +23,15 @@ setup(
         'certifi',
         'ssl',
         'logging',
-        'traceback'
+        'traceback',
+        'time',
+        'psutil',
+        'zipfile',
+        'subprocess',
+        'threading',
+        'keyboard',
+        'win32gui',
+        'win32process',
+        'pynput'
     ],
 )

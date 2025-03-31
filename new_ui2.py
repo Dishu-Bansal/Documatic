@@ -5,13 +5,33 @@ from pynput import mouse
 import win32gui
 import win32process
 from PyQt5.QtWidgets import QApplication
-from PyQt5.QtCore import QMetaObject, Qt, pyqtSlot, QThread, pyqtSignal, QObject, QEventLoop, QTimer
+from PyQt5.QtCore import Qt, pyqtSlot, QThread, pyqtSignal, QObject, QEventLoop, QTimer
 import firebase_admin
 from firebase_admin import credentials
 from firebase_admin import firestore
 import wmi
 import psutil
-import ast, logging, sys, os, certifi, ssl, requests, mimetypes
+import logging, sys, os, certifi, ssl, requests, mimetypes, threading
+
+def monitor_parent(poll_interval=1):
+    """
+    Monitor the parent process. If the parent process is no longer running,
+    exit the child process.
+    """
+    parent_pid = os.getppid()
+    while True:
+        # If parent process ID becomes 1 (or doesn't exist), it means the original parent is gone.
+        if parent_pid == 1 or not psutil.pid_exists(parent_pid):
+            print("Main process terminated. Exiting child process.")
+            break
+        time.sleep(poll_interval)
+# Configure logging
+logging.basicConfig(level=logging.DEBUG, 
+                    format='%(asctime)s - %(levelname)s - %(message)s',
+                    handlers=[
+                        logging.FileHandler("debug_log.txt"),
+                        logging.StreamHandler()
+                    ])
 
 # Configure logging
 logging.basicConfig(level=logging.DEBUG, 
@@ -334,6 +354,8 @@ def on_move(x, y):
                 # Optionally, stop tracking this event by resetting start_pos
                 start_pos = None
 
+monitor_thread = threading.Thread(target=monitor_parent, daemon=True)
+monitor_thread.start()
 # Listen for mouse events
 with mouse.Listener(
     on_click=on_click,
