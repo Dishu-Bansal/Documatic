@@ -13,21 +13,9 @@ import firebase_admin
 from firebase_admin import credentials
 from firebase_admin import firestore
 import wmi
-import keyboard, threading
+import keyboard, threading, signal, atexit
 import psutil  # pip install psutil
 
-def monitor_parent(poll_interval=1):
-    """
-    Monitor the parent process. If the parent process is no longer running,
-    exit the child process.
-    """
-    parent_pid = os.getppid()
-    while True:
-        # If parent process ID becomes 1 (or doesn't exist), it means the original parent is gone.
-        if parent_pid == 1 or not psutil.pid_exists(parent_pid):
-            print("Main process terminated. Exiting child process.")
-            break
-        time.sleep(poll_interval)
 # Configure logging
 logging.basicConfig(level=logging.DEBUG, 
                     format='%(asctime)s - %(levelname)s - %(message)s',
@@ -173,6 +161,7 @@ def setupAPI():
         if doc.exists:
             url = doc.to_dict()['link'] + "/upload"
             logging.info(f"Backend URL retrieved: {url}")
+            firebase_admin.delete_app(app)
         else:
             logging.error("Backend URL document not found!")
     except Exception as e:
@@ -180,6 +169,35 @@ def setupAPI():
 
 setupAPI()
 
+def acquire_lock():
+    lock_file = "dockie_search.lock"
+    if os.name == 'nt':
+        try:
+            fd = os.open(lock_file, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            os.close(fd)
+            return True, lock_file
+        except OSError:
+            return False, lock_file
+    else:
+        import fcntl
+        lock_fd = open(lock_file, 'w')
+        try:
+            fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return True, lock_fd
+        except IOError:
+            lock_fd.close()
+            return False, None
+
+def release_lock(lock_handle):
+    if os.name == 'nt':
+        if os.path.exists(lock_handle):
+            os.remove(lock_handle)
+    else:
+        import fcntl
+        fcntl.flock(lock_handle, fcntl.LOCK_UN)
+        lock_handle.close()
+        if os.path.exists("dockie_search.lock"):
+            os.remove("dockie_search.lock")
 class APITask(QThread):
     """Handles API call to custom server"""
     # Define signals directly in the class
@@ -340,8 +358,8 @@ MIN_PRESS_INTERVAL = 0.1  # Add a minimum to detect key holds (adjust as needed)
 # Global variables
 shift_presses = []
 last_shift_press_time = 0
-exe_path = get_resource_path("dockie/dockie.exe")
-
+exe_path = get_resource_path("dockie\dockie.exe")
+flutter_process = None
 # Configure logging
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
@@ -371,7 +389,10 @@ def on_shift_press(event):
 
             # Run the Flutter app and capture output
             try:
+                print("Running: " + str(exe_path))
                 result = subprocess.run(exe_path, shell=True, capture_output=True, text=True)
+                global flutter_process
+                flutter_process = result
                 search_query = result.stdout.strip()
                 # Filter out Flutter debug output
                 search_query = "\n".join(line for line in search_query.split("\n")
@@ -393,8 +414,38 @@ def on_shift_press(event):
         shift_presses.clear()
         last_shift_press_time = current_time
 
-def main():
-    monitor_thread = threading.Thread(target=monitor_parent, daemon=True)
+def close_flutter():
+    global flutter_process, lock_handle
+    if flutter_process:
+        flutter_process.terminate()
+        try:
+            flutter_process.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            flutter_process.kill()
+        flutter_process = None
+        print("Closed Flutter UI")
+    # release_lock(lock_handle)
+
+def startUi():
+    def monitor_parent(poll_interval=1):
+        parent_pid = os.getppid()
+        while True:
+            if parent_pid == 1 or not psutil.pid_exists(parent_pid):
+                print("Main process terminated. Exiting child process.")
+                close_flutter()
+                sys.exit(0)
+            time.sleep(poll_interval)
+
+    def signal_handler(sig, frame):
+        print(f"Received signal {sig}. Cleaning up...")
+        close_flutter()
+        sys.exit(0)
+
+    signal.signal(signal.SIGTERM, signal_handler)
+    signal.signal(signal.SIGINT, signal_handler)
+    atexit.register(close_flutter)
+
+    monitor_thread = threading.Thread(target=monitor_parent, daemon=True, name="DockieSearchParentMonitor")
     monitor_thread.start()
 
     logging.info("Application starting")
@@ -403,5 +454,10 @@ def main():
     # Keep the application running
     keyboard.wait()
 
+# locked, lock_handle = acquire_lock()
+# if not locked:
+#     print("Another instance of dockie_search is already running. Exiting.")
+#     sys.exit(0)
+
 if __name__ == "__main__":
-    main()
+    startUi()

@@ -11,20 +11,20 @@ from firebase_admin import credentials
 from firebase_admin import firestore
 import wmi
 import psutil
-import logging, sys, os, certifi, ssl, requests, mimetypes, threading
+import logging, sys, os, certifi, ssl, requests, mimetypes, threading, signal, atexit
 
-def monitor_parent(poll_interval=1):
-    """
-    Monitor the parent process. If the parent process is no longer running,
-    exit the child process.
-    """
-    parent_pid = os.getppid()
-    while True:
-        # If parent process ID becomes 1 (or doesn't exist), it means the original parent is gone.
-        if parent_pid == 1 or not psutil.pid_exists(parent_pid):
-            print("Main process terminated. Exiting child process.")
-            break
-        time.sleep(poll_interval)
+# def monitor_parent(poll_interval=1):
+#     """
+#     Monitor the parent process. If the parent process is no longer running,
+#     exit the child process.
+#     """
+#     parent_pid = os.getppid()
+#     while True:
+#         # If parent process ID becomes 1 (or doesn't exist), it means the original parent is gone.
+#         if parent_pid == 1 or not psutil.pid_exists(parent_pid):
+#             print("Main process terminated. Exiting child process.")
+#             break
+#         time.sleep(poll_interval)
 # Configure logging
 logging.basicConfig(level=logging.DEBUG, 
                     format='%(asctime)s - %(levelname)s - %(message)s',
@@ -87,12 +87,43 @@ def setupAPI():
         if doc.exists:
             url = doc.to_dict()['link'] + "/upload"
             logging.info(f"Backend URL retrieved: {url}")
+            firebase_admin.delete_app(app)
         else:
             logging.error("Backend URL document not found!")
     except Exception as e:
         logging.error(f"API setup failed: {e}")
 
 setupAPI()
+
+def acquire_lock():
+    lock_file = "dockie_drop.lock"
+    if os.name == 'nt':
+        try:
+            fd = os.open(lock_file, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            os.close(fd)
+            return True, lock_file
+        except OSError:
+            return False, lock_file
+    else:
+        import fcntl
+        lock_fd = open(lock_file, 'w')
+        try:
+            fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return True, lock_fd
+        except IOError:
+            lock_fd.close()
+            return False, None
+
+def release_lock(lock_handle):
+    if os.name == 'nt':
+        if os.path.exists(lock_handle):
+            os.remove(lock_handle)
+    else:
+        import fcntl
+        fcntl.flock(lock_handle, fcntl.LOCK_UN)
+        lock_handle.close()
+        if os.path.exists("dockie_drop.lock"):
+            os.remove("dockie_drop.lock")
 
 class APITask(QThread):
     """Handles API call to custom server"""
@@ -297,13 +328,6 @@ def launch_flutter():
         stdout_thread.start()
         print("Launched Flutter UI")
 
-def close_flutter():
-    global flutter_process
-    if flutter_process:
-        flutter_process.terminate()
-        flutter_process = None
-        print("Closed Flutter UI")
-
 def on_click(x, y, button, pressed):
     global start_pos, dragging, start_process_name
     if pressed:
@@ -354,8 +378,44 @@ def on_move(x, y):
                 # Optionally, stop tracking this event by resetting start_pos
                 start_pos = None
 
-monitor_thread = threading.Thread(target=monitor_parent, daemon=True)
+def close_flutter():
+    global flutter_process, lock_handle
+    if flutter_process:
+        flutter_process.terminate()
+        try:
+            flutter_process.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            flutter_process.kill()
+        flutter_process = None
+        print("Closed Flutter UI")
+    # release_lock(lock_handle)
+
+def monitor_parent(poll_interval=1):
+    parent_pid = os.getppid()
+    while True:
+        if parent_pid == 1 or not psutil.pid_exists(parent_pid):
+            print("Main process terminated. Exiting child process.")
+            close_flutter()
+            sys.exit(0)
+        time.sleep(poll_interval)
+
+def signal_handler(sig, frame):
+    print(f"Received signal {sig}. Cleaning up...")
+    close_flutter()
+    sys.exit(0)
+
+# locked, lock_handle = acquire_lock()
+# if not locked:
+#     print("Another instance of dockie_drop is already running. Exiting.")
+#     sys.exit(0)
+signal.signal(signal.SIGTERM, signal_handler)
+signal.signal(signal.SIGINT, signal_handler)
+atexit.register(close_flutter)
+
+monitor_thread = threading.Thread(target=monitor_parent, daemon=True, name="DockieDropParentMonitor")
 monitor_thread.start()
+# monitor_thread = threading.Thread(target=monitor_parent, daemon=True)
+# monitor_thread.start()
 # Listen for mouse events
 with mouse.Listener(
     on_click=on_click,

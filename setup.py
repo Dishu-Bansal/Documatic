@@ -33,6 +33,8 @@ setup(
         'win32gui',
         'win32process',
         'pynput',
-        'pystray'
+        'pystray',
+        'signal',
+        'atexit'
     ],
 )
